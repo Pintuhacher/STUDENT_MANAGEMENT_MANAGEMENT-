@@ -1,95 +1,50 @@
 FROM php:8.2-apache
 
-# Install MySQL PDO extension and local MariaDB server (fallback if remote DB blocks Render)
-RUN apt-get update && apt-get install -y mariadb-server \
-    && docker-php-ext-install pdo pdo_mysql \
-    && rm -rf /var/lib/apt/lists/*
+RUN docker-php-ext-install pdo_mysql \
+    && a2enmod rewrite
 
+WORKDIR /var/www/html
 COPY . /var/www/html/
 
-# Reconstruct directory structure (config/, includes/, admin/, teacher/, student/, assets/, database/) from flattened files
-RUN cd /var/www/html \
-    && mkdir -p config includes admin teacher student assets/css assets/js database uploads \
-    && for f in db.php auth.php functions.php header.php footer.php navbar.php sidebar.php; do \
-         if [ -f "$f" ]; then \
-           cp "$f" "includes/$f"; \
-           cp "$f" "config/$f"; \
-         fi; \
-       done \
-    && [ -f style.css ] && cp style.css assets/style.css && cp style.css assets/css/style.css || true \
-    && [ -f main.js ] && cp main.js assets/main.js && cp main.js assets/js/main.js || true \
-    && [ -f schema.sql ] && cp schema.sql database/schema.sql || true \
-    && mkdir -p /tmp/orig && cp *.php /tmp/orig/ \
-    && for f in /tmp/orig/*.php; do \
-         base=$(basename "$f"); \
-         clean=$(echo "$base" | sed -E 's/ *\([0-9]+\)\.php$/.php/'); \
-         case "$clean" in \
-           db.php|auth.php|functions.php|header.php|footer.php|navbar.php|sidebar.php|index.php) continue ;; \
+# The source archive is flattened; recreate the paths used by the PHP pages.
+RUN mkdir -p config includes admin teacher student assets/css assets/js database uploads \
+    && cp db.php config/db.php \
+    && cp db.php includes/db.php \
+    && cp auth.php functions.php header.php footer.php navbar.php sidebar.php includes/ \
+    && cp style.css assets/css/style.css \
+    && cp main.js assets/js/main.js \
+    && cp schema.sql database/schema.sql \
+    && cp 'index (8).php' index.php \
+    && for f in *.php; do \
+         case "$f" in \
+           'index (8).php'|'index (2).php'|'index (7).php'|'index.php'|db.php|auth.php|functions.php|header.php|footer.php|navbar.php|sidebar.php) continue ;; \
          esac; \
+         clean=$(printf '%s' "$f" | sed -E 's/ *\([0-9]+\)\.php$/.php/'); \
          cp "$f" "$clean"; \
          cp "$f" "admin/$clean"; \
          cp "$f" "teacher/$clean"; \
          cp "$f" "student/$clean"; \
        done \
-    && for f in /tmp/orig/*.php; do \
-         base=$(basename "$f"); \
-         clean=$(echo "$base" | sed -E 's/ *\([0-9]+\)\.php$/.php/'); \
-         case "$clean" in \
-           db.php|auth.php|functions.php|header.php|footer.php|navbar.php|sidebar.php) continue ;; \
+    && cp 'index (2).php' student/index.php \
+    && cp 'index (7).php' teacher/index.php \
+    && for f in /var/www/html/admin/*.php /var/www/html/teacher/*.php /var/www/html/student/*.php; do \
+         [ -f "$f" ] || continue; \
+         case "$f" in \
+           */admin/*) role=admin ;; \
+           */teacher/*) role=teacher ;; \
+           */student/*) role=student ;; \
          esac; \
-         if grep -qE "require_role\s*\(\s*['\"]admin['\"]\s*\)" "$f"; then \
-           cp "$f" "admin/$clean"; \
-         elif grep -qE "require_role\s*\(\s*['\"]teacher['\"]\s*\)" "$f"; then \
-           cp "$f" "teacher/$clean"; \
-         elif grep -qE "require_role\s*\(\s*['\"]student['\"]\s*\)" "$f"; then \
-           cp "$f" "student/$clean"; \
-         elif [ "$clean" = "index.php" ]; then \
-           cp "$f" "index.php"; \
-         fi; \
+         case "$f" in \
+           */index.php) continue ;; \
+         esac; \
+         src="/var/www/html/$(basename "$f")"; \
+         [ -f "$src" ] || continue; \
+         if grep -q "require_role('$role')\|require_role(\"$role\")" "$src"; then cp "$src" "$f"; fi; \
        done \
-    && rm -rf /tmp/orig \
-    && ln -sf /var/www/html/config /var/www/config \
-    && ln -sf /var/www/html/includes /var/www/includes \
-    && ln -sf /var/www/html/assets /var/www/assets
-
-# Add automatic local MariaDB fallback to db.php in root, config/, and includes/
-RUN cat << 'EOF' > /var/www/html/db.php
-<?php
-$host = getenv('DB_HOST') ?: 'sql108.freehosting.digitalplat.org';
-$db   = getenv('DB_NAME') ?: 'alalr_43295771_surajitdb';
-$user = getenv('DB_USER') ?: 'alalr_43295771';
-$pass = getenv('DB_PASS') ?: 'INU573Wl54n93nVW5NU03wValzoM';
-$port = getenv('DB_PORT') ?: '3306';
-$charset = 'utf8mb4';
-
-$options = [
-    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    PDO::ATTR_EMULATE_PREPARES   => false,
-    PDO::ATTR_TIMEOUT            => 3,
-];
-
-try {
-    $dsn = "mysql:host=$host;port=$port;dbname=$db;charset=$charset";
-    $pdo = new PDO($dsn, $user, $pass, $options);
-} catch (\PDOException $e) {
-    $dsn_local = "mysql:host=127.0.0.1;port=3306;dbname=edudash;charset=$charset";
-    $pdo = new PDO($dsn_local, 'edudash', 'edudash123', $options);
-}
-?>
-EOF
-RUN cp /var/www/html/db.php /var/www/html/config/db.php \
-    && cp /var/www/html/db.php /var/www/html/includes/db.php
-
-# Initialize local MariaDB with schema.sql and configure Apache port
-ENV PORT=10000
-RUN service mariadb start \
-    && mysql -e "CREATE DATABASE IF NOT EXISTS edudash CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
-    && mysql -e "CREATE USER IF NOT EXISTS 'edudash'@'127.0.0.1' IDENTIFIED BY 'edudash123'; GRANT ALL PRIVILEGES ON edudash.* TO 'edudash'@'127.0.0.1'; FLUSH PRIVILEGES;" \
-    && mysql -e "CREATE USER IF NOT EXISTS 'edudash'@'localhost' IDENTIFIED BY 'edudash123'; GRANT ALL PRIVILEGES ON edudash.* TO 'edudash'@'localhost'; FLUSH PRIVILEGES;" \
-    && (grep -viE '^\s*(CREATE\s+DATABASE|USE)\s+' /var/www/html/schema.sql | mysql edudash || true) \
     && chown -R www-data:www-data /var/www/html \
-    && sed -i 's/80/${PORT}/g' /etc/apache2/sites-available/000-default.conf /etc/apache2/ports.conf
+    && sed -i 's/^Listen 80$/Listen 10000/' /etc/apache2/ports.conf \
+    && sed -i 's#<VirtualHost .*:80>#<VirtualHost *:10000>#' /etc/apache2/sites-available/000-default.conf
 
+ENV PORT=10000
 EXPOSE 10000
-CMD service mariadb start && apache2-foreground
+CMD ["apache2-foreground"]

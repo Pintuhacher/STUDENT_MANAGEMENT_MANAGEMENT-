@@ -4,16 +4,17 @@ services:
     env: docker
     plan: free
     region: oregon
-    dockerfilePath: Dockerfile
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
     envVars:
       - key: DB_HOST
-        value: sql108.freehosting.digitalplat.org
+        sync: false
       - key: DB_NAME
-        value: alalr_43295771_surajitdb
+        sync: false
       - key: DB_USER
-        value: alalr_43295771
+        sync: false
       - key: DB_PASS
-        value: INU573Wl54n93nVW5NU03wValzoM
+        sync: false
       - key: DB_PORT
         value: "3306"
       - key: PORT
