@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: edudash-student-management
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: DB_HOST
+        value: sql108.freehosting.digitalplat.org
+      - key: DB_NAME
+        value: alalr_43295771_surajitdb
+      - key: DB_USER
+        value: alalr_43295771
+      - key: DB_PASS
+        value: INU573Wl54n93nVW5NU03wValzoM
+      - key: DB_PORT
+        value: "3306"
+      - key: PORT
+        value: "10000"
