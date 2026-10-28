@@ -7,11 +7,14 @@ RUN apt-get update && apt-get install -y mariadb-server \
 
 COPY . /var/www/html/
 
-# Reconstruct directory structure (includes/, admin/, teacher/, student/, assets/, database/) from flattened files
+# Reconstruct directory structure (config/, includes/, admin/, teacher/, student/, assets/, database/) from flattened files
 RUN cd /var/www/html \
-    && mkdir -p includes admin teacher student assets/css assets/js database uploads \
+    && mkdir -p config includes admin teacher student assets/css assets/js database uploads \
     && for f in db.php auth.php functions.php header.php footer.php navbar.php sidebar.php; do \
-         [ -f "$f" ] && cp "$f" "includes/$f" || true; \
+         if [ -f "$f" ]; then \
+           cp "$f" "includes/$f"; \
+           cp "$f" "config/$f"; \
+         fi; \
        done \
     && [ -f style.css ] && cp style.css assets/style.css && cp style.css assets/css/style.css || true \
     && [ -f main.js ] && cp main.js assets/main.js && cp main.js assets/js/main.js || true \
@@ -21,29 +24,35 @@ RUN cd /var/www/html \
          base=$(basename "$f"); \
          clean=$(echo "$base" | sed -E 's/ *\([0-9]+\)\.php$/.php/'); \
          case "$clean" in \
+           db.php|auth.php|functions.php|header.php|footer.php|navbar.php|sidebar.php|index.php) continue ;; \
+         esac; \
+         cp "$f" "$clean"; \
+         cp "$f" "admin/$clean"; \
+         cp "$f" "teacher/$clean"; \
+         cp "$f" "student/$clean"; \
+       done \
+    && for f in /tmp/orig/*.php; do \
+         base=$(basename "$f"); \
+         clean=$(echo "$base" | sed -E 's/ *\([0-9]+\)\.php$/.php/'); \
+         case "$clean" in \
            db.php|auth.php|functions.php|header.php|footer.php|navbar.php|sidebar.php) continue ;; \
          esac; \
          if grep -qE "require_role\s*\(\s*['\"]admin['\"]\s*\)" "$f"; then \
            cp "$f" "admin/$clean"; \
-           [ "$clean" != "index.php" ] && cp "$f" "$clean" || true; \
          elif grep -qE "require_role\s*\(\s*['\"]teacher['\"]\s*\)" "$f"; then \
            cp "$f" "teacher/$clean"; \
          elif grep -qE "require_role\s*\(\s*['\"]student['\"]\s*\)" "$f"; then \
            cp "$f" "student/$clean"; \
          elif [ "$clean" = "index.php" ]; then \
            cp "$f" "index.php"; \
-         else \
-           cp "$f" "$clean"; \
-           cp "$f" "admin/$clean"; \
-           cp "$f" "teacher/$clean"; \
-           cp "$f" "student/$clean"; \
          fi; \
        done \
     && rm -rf /tmp/orig \
+    && ln -sf /var/www/html/config /var/www/config \
     && ln -sf /var/www/html/includes /var/www/includes \
     && ln -sf /var/www/html/assets /var/www/assets
 
-# Add automatic local MariaDB fallback to db.php in case remote FreeHosting MySQL blocks Render IPs
+# Add automatic local MariaDB fallback to db.php in root, config/, and includes/
 RUN cat << 'EOF' > /var/www/html/db.php
 <?php
 $host = getenv('DB_HOST') ?: 'sql108.freehosting.digitalplat.org';
@@ -69,7 +78,8 @@ try {
 }
 ?>
 EOF
-RUN cp /var/www/html/db.php /var/www/html/includes/db.php
+RUN cp /var/www/html/db.php /var/www/html/config/db.php \
+    && cp /var/www/html/db.php /var/www/html/includes/db.php
 
 # Initialize local MariaDB with schema.sql and configure Apache port
 ENV PORT=10000
